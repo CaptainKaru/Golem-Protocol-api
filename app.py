@@ -71,7 +71,10 @@ def page_not_found(e):
 ##################
 def authorize_user(uname, pw):
     """ Authenticate user login. """
-    file_path = os.path.join(os.path.dirname(__file__), "data/mock-account-tbl.json")
+    # Get the absolute path to the data folder
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    file_path = os.path.join(base_dir, "data", "mock-account-tbl.json")
+    
     try:
         with open(file_path) as file:
             accounts = json.load(file)
@@ -81,18 +84,21 @@ def authorize_user(uname, pw):
             account = accounts[uname]
             hashed = account["hash"].encode()
 
-            # bcrypt.hashpw returns bytes, need to compare correctly
+            # Verify password
             if bcrypt.checkpw(pw.encode(), hashed):
                 user_level = account["userLevel"]
                 full_name = account["fullName"]
                 return user_level, full_name
     except FileNotFoundError:
         print(f"Error: File not found at {file_path}")
+        # Create empty accounts file if it doesn't exist
+        os.makedirs(os.path.dirname(file_path), exist_ok=True)
+        with open(file_path, 'w') as f:
+            json.dump({}, f)
     except Exception as e:
         print(f"Error in authorize_user: {e}")
 
     return -1, ""
-
 
 def generate_access_token(uname, user_level):
     """ Create a session token. """
@@ -104,9 +110,15 @@ def generate_access_token(uname, user_level):
 
 def load_contents():
     """ Load all contents. """
-    file_path = os.path.join(os.path.dirname(__file__), "data/mock-content-tbl.json")
-    with open(file_path) as file:
-        return json.load(file)
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    file_path = os.path.join(base_dir, "data", "mock-content-tbl.json")
+    
+    try:
+        with open(file_path) as file:
+            return json.load(file)
+    except FileNotFoundError:
+        print(f"Error: Content file not found at {file_path}")
+        return []
 
 
 def set_cors(payload):

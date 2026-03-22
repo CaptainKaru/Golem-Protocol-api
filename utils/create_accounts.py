@@ -19,11 +19,11 @@ def ask_password():
             return pw
 
 def load_accounts():
-    with open("data/mock-account-tbl.json") as file:
+    with open("../data/mock-account-tbl.json") as file:
         return json.load(file)
 
 def update_accounts(accounts):
-    with open("data/mock-account-tbl.json", "w", encoding="utf-8") as file:
+    with open("../data/mock-account-tbl.json", "w", encoding="utf-8") as file:
         json.dump(accounts, file, indent=4)
 
 def main():
