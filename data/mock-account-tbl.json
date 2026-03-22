@@ -1,0 +1,16 @@
+{
+    "carlroy": {
+        "id": "31633471-f7d3-55fb-adea-f8e93295fb08",
+        "fullName": "Carl Roy",
+        "hash": "$2b$12$J3OIPJjBa8cGb/t8anXOge4D4V3dGgIL0K5BqEH/OOIXYajdz0cLi",
+        "userLevel": 3,
+        "createdAt": 1774153076
+    },
+    "user": {
+        "id": "86fb818d-9e92-5942-a62a-b31717e7a536",
+        "fullName": "User1",
+        "hash": "$2b$12$B9j8TF5RzFI5frG2XR.ShOMLexfMoom7SMbIAc4E0QaQWvKydy0H.",
+        "userLevel": 0,
+        "createdAt": 1774155402
+    }
+}
