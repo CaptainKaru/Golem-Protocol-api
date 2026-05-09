@@ -1,126 +1,183 @@
 """
- Golem-Protocol-API v0.9.0
- (c) 2026 Talos Inc.
-"""
+Golem-Protocol-API v0.9.0
+(c) 2025 Talos Inc.
+""" 
+import re
 import os
-import json
-import hashlib  
-from datetime import datetime
-import bcrypt
+
+from supabase import create_client, Client
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 
-app = Flask("Golem-Protocolt-api")
+app = Flask("Golem-Protocol-api")
 CORS(app)
 
+supabase_url = os.environ.get("SUPABASE_URL", "")
+supabase_key = os.environ.get("SUPABASE_KEY", "")
+supabase: Client = create_client(supabase_url, supabase_key)
+
+EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+PWORD_PATTERN = re.compile(r"^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).{8,16}$")
+
+# messages
+MSG_FULLNAME_EMPTY = "Full name must not be empty."
+MSG_EMAIL_INVALID = "Fix email address format."
+MSG_PASSWORD_INVALID = (
+    "Password must be 8–16 characters; contains at least 1 "
+    "uppercase, lowercase, digit, and symbol."
+)
+
+MSG_SIGNUP_FAILED = "Sign up failed."
+MSG_ACCOUNT_CREATE_FAILED = "Account creation failed."
+MSG_SIGNIN_INVALID = "Email/password is incorrect."
+MSG_SIGNIN_FAILED = "Sign in failed."
+MSG_NOT_FOUND = "Page not found."
 
 @app.route("/")
 def index():
     return set_cors({})
 
+@app.route("/signup", methods=["POST", "OPTIONS"])
+def signup():
+    if request.method == "OPTIONS":
+        return set_cors({})
 
-@app.route("/authorize", methods=["POST"])
-def authorize():
-    payload = request.get_json()
-    uname = payload.get("username", "")
-    pw = payload.get("password", "")
+    payload = request.get_json(silent=True) or {}
+    full_name = payload.get("fullName", "").strip()
+    email = payload.get("email", "").strip().lower()
+    pword = payload.get("password", "")
+
+    if not full_name:
+        return set_cors({"success": 0, "message": MSG_FULLNAME_EMPTY})
+
+    if not EMAIL_PATTERN.match(email):
+        return set_cors({"success": 0, "message": MSG_EMAIL_INVALID})
+
+    if not PWORD_PATTERN.match(pword):
+        return set_cors({"success": 0, "message": MSG_PASSWORD_INVALID})
+
+    try:
+        # Sign up the user - this creates the user in auth.users
+        auth_response = supabase.auth.sign_up(
+            {
+                "email": email,
+                "password": pword,
+                "options": {
+                    "email_redirect_to": "https://golem-protocol.vercel.app/login",
+                },
+            }
+        )
+        
+        # Get the user's auth ID from the response
+        # This will be used for the foreign key reference auth.users(id)
+        auth_user_id = auth_response.user.id
+        
+    except Exception as e:
+        print(f"Signup error: {e}")
+        return set_cors({"success": 0, "message": MSG_SIGNUP_FAILED})
+    
+    try:
+        # Insert into user table with auth_id (foreign key to auth.users)
+        # The profile will be automatically created by the trigger
+        supabase.from_("user").insert({
+            "auth_id": auth_user_id,
+            "full_name": full_name,
+            "email": email,
+            "role": 0,
+        }).execute()
+    except Exception as e:
+        print(f"User insert error: {e}")
+        return set_cors({"success": 0, "message": MSG_ACCOUNT_CREATE_FAILED})
+
+    return set_cors({"success": 1, "message": ""})
+
+@app.route("/signin", methods=["POST", "OPTIONS"])
+def signin():
+    if request.method == "OPTIONS":
+        return set_cors({})
 
     full_name = ""
     user_level = -1
     access_token = ""
-    message = "Account not found."
-    user_level, full_name = authorize_user(uname, pw)
-    if 0 <= user_level <= 4:
-        access_token = generate_access_token(uname, user_level)
-        message = ""
+    payload = request.get_json(silent=True) or {}
+    email = payload.get("email", "").strip().lower()
+    pword = payload.get("password", "")
 
-    return set_cors({
-        "accessToken": access_token,
-        "userLevel": user_level,
-        "fullName": full_name,
-        "message": message,
-    })
-
-
-@app.route("/get_contents", methods=["GET"])
-def get_contents():
-    payload = request.args
-    uname = payload.get("username", "")
-    user_level = payload.get("userLevel", -1)
-    access_token = payload.get("accessToken", "")
-
+    if not (EMAIL_PATTERN.match(email) and PWORD_PATTERN.match(pword)):
+        return set_cors(
+            {
+                "success": 0,
+                "accessToken": access_token,
+                "userLevel": user_level,
+                "fullName": full_name,
+                "message": MSG_SIGNIN_INVALID,
+            }
+        )
+    
     try:
-        user_level = int(user_level)
-    except:
-        user_level = -1
+        # Sign in with password - authenticates against auth.users
+        data = supabase.auth.sign_in_with_password({
+            "email": email, "password": pword
+        })
+        access_token = data.session.access_token
+    except Exception as e:
+        print(f"Signin error: {e}")
+        return set_cors(
+            {
+                "success": 0,
+                "accessToken": access_token,
+                "userLevel": user_level,
+                "fullName": full_name,
+                "message": MSG_SIGNIN_FAILED,
+            }
+        )
+    
+    try:
+        # Fetch user details from custom user table
+        # The RLS policy will ensure only the authenticated user can access their data
+        response = (
+            supabase.table("user")
+            .select("full_name, role")
+            .eq("email", email)
+            .execute()
+        )
+        
+        if response.data:
+            full_name = response.data[0].get("full_name", "")
+            user_level = response.data[0].get("role", -1)
+            
+    except Exception as e:
+        print(f"User fetch error: {e}")
+        return set_cors(
+            {
+                "success": 0,
+                "accessToken": access_token,
+                "userLevel": user_level,
+                "fullName": full_name,
+                "message": MSG_SIGNIN_FAILED,
+            }
+        )
 
-    expected_token = generate_access_token(uname, user_level)
-    if not (0 <= user_level <= 4) or access_token != expected_token:
-        return set_cors({"message": "401: Unauthorized"}), 401
-
-    return set_cors({"contents": load_contents()})
-
+    return set_cors(
+        {
+            "success": 1,
+            "accessToken": access_token,
+            "userLevel": user_level,
+            "fullName": full_name,
+            "message": "",
+        }
+    )
 
 @app.errorhandler(404)
 def page_not_found(e):
-    return set_cors({"message": "Page not found."})
-
-
-##################
-# utils #
-##################
-def authorize_user(uname, pw):
-    """ Authenticate user login. """
-
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    file_path = os.path.join(base_dir, "data", "mock-account-tbl.json")
-    
-    try:
-        with open(file_path) as file:
-            accounts = json.load(file)
-            if uname not in accounts:
-                return -1, ""
-
-            account = accounts[uname]
-            hashed = account["hash"].encode()
-
-            if bcrypt.checkpw(pw.encode(), hashed):
-                user_level = account["userLevel"]
-                full_name = account["fullName"]
-                return user_level, full_name
-    except FileNotFoundError:
-        print(f"Error: File not found at {file_path}")
-        os.makedirs(os.path.dirname(file_path), exist_ok=True)
-        with open(file_path, 'w') as f:
-            json.dump({}, f)
-    except Exception as e:
-        print(f"Error in authorize_user: {e}")
-
-    return -1, ""
-
-def generate_access_token(uname, user_level):
-    """ Create a session token. """
-
-    today = datetime.now().strftime("%Y-%m")
-    message = (uname + str(user_level) + today).encode()
-    return hashlib.sha1(message).hexdigest()
-
-
-def load_contents():
-    """ Load all contents. """
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    file_path = os.path.join(base_dir, "data", "mock-content-tbl.json")
-    
-    try:
-        with open(file_path) as file:
-            return json.load(file)
-    except FileNotFoundError:
-        print(f"Error: Content file not found at {file_path}")
-        return []
-
+    return set_cors({"message": MSG_NOT_FOUND})
 
 def set_cors(payload):
-    """ Wraps payload in a JSON response with CORS headers. """
     response = jsonify(payload)
     response.headers.add("Access-Control-Allow-Origin", "*")
+    response.headers.add("Access-Control-Allow-Headers", "Content-Type")
+    response.headers.add("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
     return response
+
+if __name__ == "__main__":
+    app.run(debug=True, host='0.0.0.0', port=5000)
