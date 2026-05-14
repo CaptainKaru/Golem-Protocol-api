@@ -52,6 +52,9 @@ def signup():
 
     payload = request.get_json(silent=True) or {}
     username = payload.get("username", "").strip()
+    if not username:
+        username = payload.get("fullName", "").strip()  # Add this line
+    
     email = payload.get("email", "").strip().lower()
     pword = payload.get("password", "")
 
@@ -64,7 +67,7 @@ def signup():
     if not PWORD_PATTERN.match(pword):
         return set_cors({"success": 0, "message": MSG_PASSWORD_INVALID})
 
-    # Check if username or email already exists in custom user table
+    # Check if username or email already exists
     try:
         existing = supabase.table("user").select("username, email").or_(
             f"username.eq.{username},email.eq.{email}"
@@ -78,7 +81,7 @@ def signup():
                     return set_cors({"success": 0, "message": MSG_EMAIL_TAKEN})
     except Exception as e:
         print(f"User check error: {e}")
-        return set_cors({"success": 0, "message": MSG_SIGNUP_FAILED})
+        return set_cors({"success": 0, "message": f"User check failed: {str(e)}"})
 
     try:
         # Sign up the user in Supabase Auth
@@ -93,25 +96,29 @@ def signup():
         })
         auth_user_id = auth_response.user.id
     except Exception as e:
-        print(f"Signup error: {e}")
-        return set_cors({"success": 0, "message": MSG_SIGNUP_FAILED})
+        print(f"Supabase auth error: {e}")
+        # Return the actual error message
+        return set_cors({"success": 0, "message": f"Auth error: {str(e)}"})
 
     try:
-        # Insert into custom user table (matches schema)
+        # Insert into custom user table
         supabase.table("user").insert({
-            "id": auth_user_id,  # Use same UUID as auth.users
+            "id": auth_user_id,
             "username": username,
             "email": email,
             "password_hash": generate_password_hash(pword),
-            "role": "user",  # Default role
+            "role": "user",
             "is_active": True,
             "is_deleted": False
         }).execute()
     except Exception as e:
         print(f"User insert error: {e}")
         # Clean up auth user if custom table insert fails
-        supabase.auth.admin.delete_user(auth_user_id)
-        return set_cors({"success": 0, "message": MSG_ACCOUNT_CREATE_FAILED})
+        try:
+            supabase.auth.admin.delete_user(auth_user_id)
+        except:
+            pass
+        return set_cors({"success": 0, "message": f"Insert error: {str(e)}"})
 
     return set_cors({"success": 1, "message": ""})
 
